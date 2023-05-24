@@ -2,29 +2,22 @@ import Core
 import UIKit
 
 public class ScoreCell: UICollectionViewCell {
-    var score: Score?
+    var viewModel: ScoreViewModel?
 
     override public func updateConfiguration(using state: UICellConfigurationState) {
-        contentConfiguration = ScoreContentConfiguration(score: score)
-            .updated(for: state)
+        guard let viewModel else { return }
+        
+        var content = ScoreContentConfiguration(viewModel: viewModel).updated(for: state)
+        content.viewModel.isSelected = state.isSelected
+        contentConfiguration = content
     }
 }
 
 private struct ScoreContentConfiguration: UIContentConfiguration, Hashable {
-    var date: String
-    var tries: [String]
-    var word: String
+    var viewModel: ScoreViewModel
 
-    init(score: Score? = nil) {
-        guard let score else {
-            date = ""
-            tries = []
-            word = ""
-            return
-        }
-        date = score.date.stringValue
-        tries = score.tries
-        word = score.word
+    init(viewModel: ScoreViewModel) {
+        self.viewModel = viewModel
     }
 
     func makeContentView() -> UIView & UIContentView {
@@ -49,7 +42,7 @@ private class ScoreContentView: UIView, UIContentView {
 
     private lazy var stackView: UIStackView = makeStackView()
     private lazy var dateLabel: UILabel = makeDateLabel()
-    private var rowViews: [WordRowView] = []
+    private lazy var statLabel: UILabel = makeDateLabel()
 
     init(configuration: ScoreContentConfiguration) {
         _configuration = configuration
@@ -68,12 +61,16 @@ private class ScoreContentView: UIView, UIContentView {
     }
 
     private func apply(configuration: ScoreContentConfiguration) {
-        rowViews.forEach { $0.removeFromSuperview() }
-        rowViews.removeAll()
-
-        dateLabel.text = configuration.date
-        configuration.tries.forEach { word in
-            let row = WordRowView(word: word)
+        stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        
+        let viewModel = configuration.viewModel
+        dateLabel.text = viewModel.date
+        statLabel.text = viewModel.statText
+        
+        stackView.addArrangedSubview(statLabel)
+        stackView.addArrangedSubview(dateLabel)
+        viewModel.tries.forEach {
+            let row = makeRowView(from: $0, isSelected: viewModel.isSelected)
             stackView.addArrangedSubview(row)
         }
 
@@ -81,11 +78,23 @@ private class ScoreContentView: UIView, UIContentView {
     }
 
     private func makeStackView() -> UIStackView {
-        let view = UIStackView(arrangedSubviews: [dateLabel])
+        let view = UIStackView()
         view.translatesAutoresizingMaskIntoConstraints = false
         view.axis = .vertical
         view.spacing = 10
         view.alignment = .leading
+        return view
+    }
+    
+    private func makeStatsLabel() -> UILabel {
+        let view = UILabel(frame: .zero)
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.numberOfLines = 1
+        view.lineBreakMode = .byTruncatingMiddle
+        view.allowsDefaultTighteningForTruncation = true
+        view.adjustsFontForContentSizeCategory = true
+        view.font = UIFont.preferredFont(forTextStyle: .title1)
+        view.textColor = .label
         return view
     }
 
@@ -100,18 +109,29 @@ private class ScoreContentView: UIView, UIContentView {
         view.textColor = .label
         return view
     }
+    
+    private func makeRowView(from try: TriesCollection.Element, isSelected: Bool) -> WordRowView {
+        let word = `try`.key.word
+        let results = `try`.value
+        
+        return WordRowView(isSelected: isSelected, word: word, results: results)
+    }
 }
 
 private final class WordRowView: UIView {
-    private var word: String
     private let letterViews: [LetterView]
     private lazy var stackView: UIStackView = makeStackView()
 
-    init(word: String) {
+    init(isSelected: Bool, word: String, results: [LetterResult]) {
         precondition(word.utf8.count == 5)
-        self.word = word
-        letterViews = word.map { LetterView(letter: String($0)) }
+        precondition(results.count <= 5)
+        
+        letterViews = word.enumerated().map {
+            LetterView(letter: String($0.element), result: results[$0.offset], isVisible: isSelected)
+        }
+        
         super.init(frame: .zero)
+        
         addConstrainedSubview(stackView)
         setUpContraints()
     }
@@ -145,19 +165,33 @@ private final class WordRowView: UIView {
 }
 
 private final class LetterView: UIView {
-    private var letter: String
+    private let letter: String
+    private let result: LetterResult
+    private let isVisible: Bool
+    
     private lazy var label: UILabel = makeLabel()
 
-    init(letter: String) {
+    init(letter: String, result: LetterResult, isVisible: Bool) {
         precondition(letter.utf8.count == 1)
+        
         self.letter = letter
+        self.result = result
+        self.isVisible = isVisible
+        
         super.init(frame: .zero)
+        
+        setupUI()
         addConstrainedSubview(label)
     }
 
     @available(*, unavailable)
     required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupUI() {
+        label.isHidden = !isVisible
+        backgroundColor = color(for: result)
     }
 
     private func makeLabel() -> UILabel {
@@ -170,9 +204,19 @@ private final class LetterView: UIView {
         view.adjustsFontForContentSizeCategory = true
         view.textAlignment = .center
         view.textColor = .label
-        view.backgroundColor = .systemFill
         view.text = letter
         return view
+    }
+    
+    private func color(for result: LetterResult) -> UIColor {
+        switch result {
+        case .correct:
+            return .systemGreen
+        case .wrongPosition:
+            return .systemYellow
+        case .wrong:
+            return .systemFill
+        }
     }
 }
 
@@ -188,11 +232,16 @@ private final class LetterView: UIView {
 
     private struct CellView: UIViewRepresentable {
         func makeUIView(context _: Context) -> ScoreContentView {
-            ScoreContentView(configuration: .init(score: .init(
+            ScoreContentView(configuration: .init(viewModel: .init(
                 id: 1,
-                date: .init(year: 2022, month: 3, day: 27),
-                word: "nymph",
-                tries: ["train", "ponds", "blume", "nymph"]
+                date: "2022/03/05",
+                tries: [
+                    .init(word: "corgi"): [.wrong, .wrong, .wrongPosition, .wrong, .wrong],
+                    .init(word: "corge"): [.correct, .correct, .wrongPosition, .wrong, .correct],
+                    .init(word: "pause"): [.correct, .correct, .wrongPosition, .wrong, .correct],
+                    .init(word: "sleds"): [.wrongPosition, .correct, .wrongPosition, .wrong, .correct],
+                    .init(word: "sweet"): [.correct, .correct, .correct, .correct, .correct]
+                ]
             )))
         }
 

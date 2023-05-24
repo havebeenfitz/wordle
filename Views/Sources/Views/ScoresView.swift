@@ -30,35 +30,47 @@ public class ScoresViewController: UIViewController {
 
     override public func viewDidLoad() {
         super.viewDidLoad()
+        
+        setupUI()
+        setupSubscriptions()
+    }
+}
+
+private extension ScoresViewController {
+    func setupUI() {
+        title = "Wordle Stats"
         view.addConstrainedSubview(collectionView)
+        navigationController?.navigationBar.prefersLargeTitles = true
+    }
+    
+    func setupSubscriptions() {
         scoresPublisher
             .replaceError(with: [])
             .receive(on: DispatchQueue.main)
             .sink(receiveValue: onReceiveScores)
             .store(in: &cancellables)
     }
-}
-
-private extension ScoresViewController {
+    
     func makeCollectionView() -> UICollectionView {
         let configuration = UICollectionLayoutListConfiguration(appearance: .plain)
         let layout = UICollectionViewCompositionalLayout.list(using: configuration)
-
-        return UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionView.allowsMultipleSelection = true
+        return collectionView
     }
 
     func makeDataSource() -> UICollectionViewDiffableDataSource<Section, Int> {
-        let cellRegistration = UICollectionView.CellRegistration<ScoreCell, Score>
-        { cell, _, score in cell.score = score }
+        let cellRegistration = UICollectionView.CellRegistration<ScoreCell, ScoreViewModel>
+        { cell, _, viewModel in cell.viewModel = viewModel }
 
         return UICollectionViewDiffableDataSource<Section, Int>(
             collectionView: collectionView
         ) { [weak self] collectionView, indexPath, itemIdentifier in
-            let score: Score? = self?.scores[itemIdentifier]
+            let viewModel = self?.scores[itemIdentifier]?.asViewModel
             return collectionView.dequeueConfiguredReusableCell(
                 using: cellRegistration,
                 for: indexPath,
-                item: score
+                item: viewModel
             )
         }
     }
